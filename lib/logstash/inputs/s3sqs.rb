@@ -139,41 +139,33 @@ class LogStash::Inputs::S3SQS < LogStash::Inputs::Threadable
           rescue => e
             @logger.warn("issuing :skip_delete on failed download", :bucket => record['s3']['bucket']['name'], :object => record['s3']['object']['key'], :error => e)
             throw :skip_delete
-          end
-          # verify downloaded content size
-          if response.content_length == record['s3']['object']['size'] then
-            body = response.body
-            # if necessary unzip
-            if response.content_encoding == "gzip" or record['s3']['object']['key'].end_with?(".gz") then
-              begin
-		            temp = Zlib::GzipReader.new(body)
-              rescue => e
-                @logger.warn("content is marked to be gzipped but can't unzip it, assuming plain text", :bucket => record['s3']['bucket']['name'], :object => record['s3']['object']['key'], :error => e)
-                temp = body
-              end
-              body = temp
-            end
-            # process the plain text content
+        end
+          body = response.body
+          # if necessary unzip
+          if response.content_encoding == "gzip" or record['s3']['object']['key'].end_with?(".gz") then
             begin
-              lines = body.read.encode('UTF-8', 'binary', invalid: :replace, undef: :replace, replace: "\u2370").split(/\n/)
-              lines.each do |line|
-                @codec.decode(line) do |event|
-                  decorate(event)
-
-                  event.set('[@metadata][s3_bucket_name]', record['s3']['bucket']['name'])
-                  event.set('[@metadata][s3_object_key]', record['s3']['object']['key'])
-
-                  queue << event
-                end
-              end
+	            temp = Zlib::GzipReader.new(body)
             rescue => e
-              @logger.warn("issuing :skip_delete on failed plain text processing", :bucket => record['s3']['bucket']['name'], :object => record['s3']['object']['key'], :error => e)
-              throw :skip_delete
+              @logger.warn("content is marked to be gzipped but can't unzip it, assuming plain text", :bucket => record['s3']['bucket']['name'], :object => record['s3']['object']['key'], :error => e)
+              temp = body
             end
-          # otherwise try again later
-          else
-            @logger.warn("issuing :skip_delete on wrong download content size", :bucket => record['s3']['bucket']['name'], :object => record['s3']['object']['key'],
-              :download_size => response.content_length, :expected => record['s3']['object']['size'])
+            body = temp
+          end
+          # process the plain text content
+          begin
+            lines = body.read.encode('UTF-8', 'binary', invalid: :replace, undef: :replace, replace: "\u2370").split(/\n/)
+            lines.each do |line|
+              @codec.decode(line) do |event|
+                decorate(event)
+
+                event.set('[@metadata][s3_bucket_name]', record['s3']['bucket']['name'])
+                event.set('[@metadata][s3_object_key]', record['s3']['object']['key'])
+
+                queue << event
+              end
+            end
+          rescue => e
+            @logger.warn("issuing :skip_delete on failed plain text processing", :bucket => record['s3']['bucket']['name'], :object => record['s3']['object']['key'], :error => e)
             throw :skip_delete
           end
         end
